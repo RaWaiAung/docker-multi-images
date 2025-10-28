@@ -55,7 +55,7 @@ jobs:
             aws elasticbeanstalk create-application-version \
                 --application-name "multi-docker" \
                 --version-label "${TIMESTAMP}" \
-                --source-bundle S3Bucket="multi-docker-deploy-bucket",S3Key="${TIMESTAMP}.zip"
+                --source-bundle S3Bucket="${{ secrets.S3_BUCKET_NAME }}",S3Key="docker-multi/${TIMESTAMP}.zip"
 
             aws elasticbeanstalk update-environment \
                 --environment-name "Multi-docker-env" \
