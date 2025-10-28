@@ -32,3 +32,33 @@ jobs:
             docker push ${{ secrets.DOCKER_USERNAME }}/multi-nginx
             docker push ${{ secrets.DOCKER_USERNAME }}/multi-server
             docker push ${{ secrets.DOCKER_USERNAME }}/multi-worker
+        - name: 📦 Prepare Elastic Beanstalk bundle
+          run: |
+           echo "📦 Creating deployment bundle zip..."
+           zip -r deploy.zip Dockerrun.aws.json
+           echo "✅ Bundle created: deploy.zip"
+
+        - name: ☁ Configure AWS credentials
+          uses: aws-actions/configure-aws-credentials@v4
+          with:
+           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+           aws-region: ${{ secrets.AWS_REGION }}
+
+        - name: 🚀 Deploy to Elastic Beanstalk
+          run: |
+            echo "🚀 Uploading new application version to Elastic Beanstalk..."
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+
+            aws s3 cp deploy.zip "s3://${{ secrets.S3_BUCKET_NAME }}/docker-multi/${TIMESTAMP}.zip"
+
+            aws elasticbeanstalk create-application-version \
+                --application-name "multi-docker" \
+                --version-label "${TIMESTAMP}" \
+                --source-bundle S3Bucket="multi-docker-deploy-bucket",S3Key="${TIMESTAMP}.zip"
+
+            aws elasticbeanstalk update-environment \
+                --environment-name "Multi-docker-env" \
+                --version-label "${TIMESTAMP}"
+
+            echo "🎉 Deploy triggered to Elastic Beanstalk environment Multi-docker-env"
