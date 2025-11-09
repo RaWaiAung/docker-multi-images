@@ -1,64 +1,84 @@
-name: My Docker Deployment
+name: Build & Deploy (Docker Hub → GKE)
+
 on:
-    push:
-        branches:
-            - master
+  push:
+    branches: [master]
+
+env:
+  IMAGE_OWNER: rwadev026 # Docker Hub namespace
+  APPS: client,server,worker # app directories and image suffixes
+  K8S_DIR: k8s
+
 jobs:
-    build_and_deploy:
-        runs-on: ubuntu-latest
-        steps:
-        - name: Checkout Repository
-          uses: actions/checkout@v4
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: Set up Docker Buildx
-          uses: docker/setup-buildx-action@v3
+      # Short SHA for tag
+      - name: Set TAG
+        run: echo "TAG=${GITHUB_SHA::12}" >> $GITHUB_ENV
 
-        - name: Build Multi Docker Image
-          run: |
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/multi-client ./client
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/multi-nginx ./nginx
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/multi-server ./server
-            docker build -t ${{ secrets.DOCKER_USERNAME }}/multi-worker ./worker
+      # Login to Docker Hub (safe: uses token)
+      - name: Docker login
+        run: |
+          echo "$DOCKERHUB_PASSWORD" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKERHUB_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
-        - name: 🔐 Login to Docker Hub
-          uses: docker/login-action@v3
-          with:
-            username: ${{ secrets.DOCKER_USERNAME }}
-            password: ${{ secrets.DOCKER_PASSWORD }}
+      # Build & push each image with TAG (+ optionally latest)
+      - name: Build & push images
+        run: |
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-client:latest -t ${{ env.IMAGE_OWNER }}/multi-client:$SHA -f ./client/Dockerfile ./client
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-server:latest -t ${{ env.IMAGE_OWNER }}/multi-server:$SHA -f ./server/Dockerfile ./server
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-worker:latest -t ${{ env.IMAGE_OWNER }}/multi-worker:$SHA -f ./worker/Dockerfile ./worker
+          docker push stephengrider/multi-client:${TAG}
+          docker push stephengrider/multi-server:${TAG}
+          docker push stephengrider/multi-worker:${TAG}
+          docker push stephengrider/multi-client:latest
+          docker push stephengrider/multi-server:latest
+          docker push stephengrider/multi-worker:latest
 
-        - name: Push Multi Docker Image
-          run: |
-            docker push ${{ secrets.DOCKER_USERNAME }}/multi-client
-            docker push ${{ secrets.DOCKER_USERNAME }}/multi-nginx
-            docker push ${{ secrets.DOCKER_USERNAME }}/multi-server
-            docker push ${{ secrets.DOCKER_USERNAME }}/multi-worker
-        - name: 📦 Prepare Elastic Beanstalk bundle
-          run: |
-           echo "📦 Creating deployment bundle zip..."
-           zip -r deploy.zip Dockerrun.aws.json
-           echo "✅ Bundle created: deploy.zip"
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-        - name: ☁ Configure AWS credentials
-          uses: aws-actions/configure-aws-credentials@v4
-          with:
-           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY }}
-           aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
-           aws-region: ${{ secrets.AWS_REGION }}
+      - name: Set TAG
+        run: echo "TAG=${GITHUB_SHA::12}" >> $GITHUB_ENV
 
-        - name: 🚀 Deploy to Elastic Beanstalk
-          run: |
-            echo "🚀 Uploading new application version to Elastic Beanstalk..."
-            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+      # Auth to GCP with Service Account JSON
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-            aws s3 cp deploy.zip "s3://${{ secrets.S3_BUCKET_NAME }}/docker-multi/${TIMESTAMP}.zip"
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
 
-            aws elasticbeanstalk create-application-version \
-                --application-name "multi-docker" \
-                --version-label "${TIMESTAMP}" \
-                --source-bundle S3Bucket="${{ secrets.S3_BUCKET_NAME }}",S3Key="docker-multi/${TIMESTAMP}.zip"
+      # Get kubeconfig for GKE (region or zone)
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          cluster_name: ${{ secrets.GKE_CLUSTER }}
+          location: ${{ secrets.GKE_REGION }}
 
-            aws elasticbeanstalk update-environment \
-                --environment-name "Multi-docker-env" \
-                --version-label "${TIMESTAMP}"
+      # Apply manifests (create/update)
+      - name: kubectl apply
+        run: kubectl apply -f ${{ env.K8S_DIR }}
 
-            echo "🎉 Deploy triggered to Elastic Beanstalk environment Multi-docker-env"
+      # Pin deployments to immutable tags
+      - name: Set images
+        run: |
+          kubectl set image deployment/server-deployment server=${{ env.IMAGE_OWNER }}/multi-server:${TAG}
+          kubectl set image deployment/client-deployment client=${{ env.IMAGE_OWNER }}/multi-client:${TAG}
+          kubectl set image deployment/worker-deployment worker=${{ env.IMAGE_OWNER }}/multi-worker:${TAG}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/server-deployment
+          kubectl rollout status deployment/client-deployment
+          kubectl rollout status deployment/worker-deployment
