@@ -7,8 +7,6 @@ on:
 env:
   IMAGE_OWNER: rwadev026 # Docker Hub namespace
   APPS: client,server,worker # app directories and image suffixes
-  K8S_DIR: k8s
-
 jobs:
   build-push:
     runs-on: ubuntu-latest
@@ -68,7 +66,7 @@ jobs:
 
       # Apply manifests (create/update)
       - name: kubectl apply
-        run: kubectl apply -f ${{ env.K8S_DIR }}
+        run: kubectl apply -f k8s
 
       # Pin deployments to immutable tags
       - name: Set images
