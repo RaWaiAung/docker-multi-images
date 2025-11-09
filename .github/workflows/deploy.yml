@@ -30,15 +30,15 @@ jobs:
       # Build & push each image with TAG (+ optionally latest)
       - name: Build & push images
         run: |
-          docker build -t ${{ env.IMAGE_OWNER }}/multi-client:latest -t ${{ env.IMAGE_OWNER }}/multi-client:$SHA -f ./client/Dockerfile ./client
-          docker build -t ${{ env.IMAGE_OWNER }}/multi-server:latest -t ${{ env.IMAGE_OWNER }}/multi-server:$SHA -f ./server/Dockerfile ./server
-          docker build -t ${{ env.IMAGE_OWNER }}/multi-worker:latest -t ${{ env.IMAGE_OWNER }}/multi-worker:$SHA -f ./worker/Dockerfile ./worker
-          docker push stephengrider/multi-client:${TAG}
-          docker push stephengrider/multi-server:${TAG}
-          docker push stephengrider/multi-worker:${TAG}
-          docker push stephengrider/multi-client:latest
-          docker push stephengrider/multi-server:latest
-          docker push stephengrider/multi-worker:latest
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-client:latest -t ${{ env.IMAGE_OWNER }}/multi-client::${TAG} -f ./client/Dockerfile ./client
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-server:latest -t ${{ env.IMAGE_OWNER }}/multi-server::${TAG} -f ./server/Dockerfile ./server
+          docker build -t ${{ env.IMAGE_OWNER }}/multi-worker:latest -t ${{ env.IMAGE_OWNER }}/multi-worker::${TAG} -f ./worker/Dockerfile ./worker
+          docker push ${{ env.IMAGE_OWNER }}/multi-client:${TAG}
+          docker push ${{ env.IMAGE_OWNER }}/multi-server:${TAG}
+          docker push ${{ env.IMAGE_OWNER }}/multi-worker:${TAG}
+          docker push ${{ env.IMAGE_OWNER }}/multi-client:latest
+          docker push ${{ env.IMAGE_OWNER }}/multi-server:latest
+          docker push ${{ env.IMAGE_OWNER }}/multi-worker:latest
 
   deploy:
     needs: build-push
